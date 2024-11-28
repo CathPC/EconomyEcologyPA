@@ -1,0 +1,40 @@
+\begin{table}
+\centering
+\begin{talltblr}[         %% tabularray outer open
+entry=none,label=none,
+note{}={+ p < 0.1, * p < 0.05, ** p < 0.01, *** p < 0.001},
+]                     %% tabularray outer close
+{                     %% tabularray inner open
+colspec={Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]Q[]},
+column{1}={halign=l,},
+column{2}={halign=c,},
+column{3}={halign=c,},
+column{4}={halign=c,},
+column{5}={halign=c,},
+column{6}={halign=c,},
+column{7}={halign=c,},
+column{8}={halign=c,},
+column{9}={halign=c,},
+hline{16}={1,2,3,4,5,6,7,8,9}{solid, 0.05em, black},
+}                     %% tabularray inner close
+\toprule
+& primary\_only & altruism & trust & patience & risktaking & primary\_with\_PCA1 & primary\_with\_PCA2 & full\_model \\ \midrule %% TinyTableHeader
+(Intercept) & \num{-1.514}*** & \num{-1.493}*** & \num{-1.509}*** & \num{-1.494}*** & \num{-1.497}*** & \num{-1.542}*** & \num{-1.516}*** & \num{-1.541}*** \\
+& (\num{0.091})   & (\num{0.092})   & (\num{0.092})   & (\num{0.091})   & (\num{0.091})   & (\num{0.090})   & (\num{0.090})   & (\num{0.089})   \\
+altruism    & \num{0.105}     & \num{-0.006}    &                  &                  &                  & \num{0.178}     & \num{0.121}     & \num{0.183}     \\
+& (\num{0.254})   & (\num{0.252})   &                  &                  &                  & (\num{0.249})   & (\num{0.253})   & (\num{0.249})   \\
+trust       & \num{-0.548}+   &                  & \num{-0.414}    &                  &                  & \num{-0.620}+   & \num{-0.642}+   & \num{-0.684}*   \\
+& (\num{0.329})   &                  & (\num{0.313})   &                  &                  & (\num{0.324})   & (\num{0.335})   & (\num{0.329})   \\
+patience    & \num{0.369}     &                  &                  & \num{0.315}     &                  & \num{-0.241}    & \num{0.375}     & \num{-0.190}    \\
+& (\num{0.236})   &                  &                  & (\num{0.225})   &                  & (\num{0.350})   & (\num{0.235})   & (\num{0.350})   \\
+risktaking  & \num{0.153}     &                  &                  &                  & \num{0.231}     & \num{0.428}     & \num{0.081}     & \num{0.350}     \\
+& (\num{0.283})   &                  &                  &                  & (\num{0.279})   & (\num{0.309})   & (\num{0.286})   & (\num{0.315})   \\
+PCA1        &                  &                  &                  &                  &                  & \num{-0.129}*   &                  & \num{-0.120}*   \\
+&                  &                  &                  &                  &                  & (\num{0.056})   &                  & (\num{0.056})   \\
+PCA2        &                  &                  &                  &                  &                  &                  & \num{0.087}     & \num{0.064}     \\
+&                  &                  &                  &                  &                  &                  & (\num{0.071})   & (\num{0.069})   \\
+Num.Obs.    & \num{75}        & \num{75}        & \num{75}        & \num{75}        & \num{75}        & \num{75}        & \num{75}        & \num{75}        \\
+R2          & \num{0.052}     & \num{0.000}     & \num{0.020}     & \num{0.021}     & \num{0.007}     & \num{0.110}     & \num{0.069}     & \num{0.122}     \\
+\bottomrule
+\end{talltblr}
+\end{table}

@@ -8,7 +8,13 @@ library(here)
 library(rnaturalearth)
 library(tidyverse)
 library(sf)
-
+library(ggpmisc)
+library(glmmTMB)
+library(DHARMa)
+library(modelsummary)
+library(FactoMineR)
+library(factoextra)
+library(rsample)
 ################################################################
 ################################################################
 ################FUNCTION LOADING################################
@@ -23,28 +29,26 @@ governancedata = formatWGIdata(pathgovdata = 'data/wgidataset.xlsx',
               variableWGI = c('VoiceAccount', 'PoliticalStability', 'GovEffectiveness', 'RegulatoryQuality','RuleOfLaw', 'ControlCorruption'))
 
 governancedata.managed = governancedata %>% 
-  filter(year > 2018) %>% 
+  filter(year > 2016 & year < 2022) %>% 
   group_by(Country, isocode) %>% 
   dplyr::select(-year) %>% 
   summarise_all(mean, na.rm = T) %>% 
   ungroup()
 
 #small basic plot - less variation within country than accross countries 
-ggplot(governancedata, aes(x=year, y = GovEffectiveness, group = Country))+geom_line()
+#ggplot(governancedata, aes(x=year, y = GovEffectiveness, group = Country))+geom_line()
 
 #2 - format landuse data - keep only percentage country and urban percentage
 landusedata = read_csv('data/LAND_COVER_08112023114050883.csv') %>% 
   filter(MEAS == 'PCNT' & VARIABLE == 'URBAN')
+landusedata.managed =  landusedata %>% 
+  filter(Year > 2016 & Year < 2022)%>% 
+  dplyr::select(COU, Country, Value) %>% 
+  group_by(COU, Country) %>% 
+  summarise_all(mean, na.rm = T) %>% 
+  ungroup()%>% 
+  arrange(COU, Country)
 
-landusedata.managed=  landusedata %>% 
-  filter(Year == '2019') %>% 
-  dplyr::select(COU, Country, Year, Value)
-  # group_by(COU, Country) %>% 
-  # summarise(minyear = min(Year),
-  #        maxyear = max(Year),
-  #        yearInterval = maxyear-minyear,
-  #        meanPercentage = mean(Value),
-  #        growtherArtificial = meanPercentage/yearInterval)
 
 #3 - format PROTECTED AREAS
 mypathnextcloud = '/Users/vjourne/Nextcloud/behavioral_climate/prog/protected_areas_formating'
@@ -74,162 +78,18 @@ summarypercentagearea_versionNatRegInter = getPercentagePA(sfuse = F,
                                         methodrobust = F )
   
 
-#data from databank.worldbank.org 
-pa_terrest <- read_csv("./data/PROTECTED_AREAS_terrestrial.csv") %>% 
-  dplyr::select(COU, Country, Value, YEA) %>% 
-  group_by(COU, Country) %>% 
-  slice(which.max(YEA)) %>% 
-  mutate(Value = Value) %>% 
-  dplyr::select(COU, Value)
+#data from databank.worldbank.org - provided similar outputs :')  
+# pa_terrest <- read_csv("./data/PROTECTED_AREAS_terrestrial.csv") %>% 
+#   dplyr::select(COU, Country, Value, YEA) %>% 
+#   group_by(COU, Country) %>% 
+#   slice(which.max(YEA)) %>% 
+#   mutate(Value = Value) %>% 
+#   dplyr::select(COU, Value)
+# 
+# pa_water <- read_csv("./data/API_ER.MRN.PTMR.ZS_DS2_en_csv_v2_3446248.csv", skip = 3) %>% 
+#   dplyr::select(1,2,`2020`) %>% 
+#   rename(Country = 1, isocode = 2, pawater = 3)
 
-pa_water <- read_csv("./data/API_ER.MRN.PTMR.ZS_DS2_en_csv_v2_3446248.csv", skip = 3) %>% 
-  dplyr::select(1,2,`2020`) %>% 
-  rename(Country = 1, isocode = 2, pawater = 3)
-
-
-library(ggpmisc)
-
-# PAterrestre %>% 
-#   mutate(perus = percentageByCountry_sum) %>% 
-#   left_join(pa_terrest %>% rename(isocode = COU)) %>% 
-#   ggplot(aes(y = perus,
-#              x = Value))+
-#   geom_abline(slope = 1, intercept = 0, col = 'red')+
-#   geom_point(size = 2, alpha = .6, shape = 21, col = 'black', fill = 'black', stroke = .8)+
-#   stat_poly_line(size =.5) +
-#   stat_poly_eq()+
-#   ylab('our pa value ')
-#   
-# PAterrestre %>% 
-#   mutate(perus = percentageByCountry_sum) %>% 
-#   left_join(pa_water) %>% 
-#   ggplot(aes(y = perus,
-#              x = pawater))+
-#   geom_abline(slope = 1, intercept = 0, col = 'red')+
-#   geom_point(size = 2, alpha = .6, shape = 21, col = 'black', fill = 'black', stroke = .8)+
-#   stat_poly_line(size =.5) +
-#   stat_poly_eq()+
-#   ylab('pa terrestrial')+
-#   xlab('pa marine')
-  
-
-##################################################################
-#4 - format species richness for each country rarity 
-#use IUCN redlist https://www.iucnredlist.org/resources/other-spatial-downloads 
-#even if only animals species ... 
-library(raster)
-library(sf)
-library(dplyr)
-library(exactextractr)  # For raster extraction by polygons
-
-rarity_raster.init <- terra::rast("data/Combined_THR_SR_2023/Combined_THR_SR_2023.tif")
-rarity_raster_wgs84 <- terra::project(rarity_raster.init, "EPSG:4326")
-rarity_raster <- terra::ifel(rarity_raster_wgs84>126, NA, rarity_raster_wgs84)
-countries <- ne_countries(returnclass = "sf")
-
-#just check with plot 
-library(rasterVis)
-gplot(rarity_raster) + 
-  geom_tile(aes(fill = value)) 
-
-#writeRaster(rarity_raster,'test.tif')
-
-# extracts the raster values within each country's boundaries
-results <- exact_extract(rarity_raster, countries, 'mean', progress = TRUE)
-countries$mean_rarity <- results
-# make raster values into "rarity" or "no rarity", if higher than 0 strictly 
-#rarity_binary_raster <- terra::app(rarity_raster, fun = function(x) ifelse(x > 0, 1, NA))
-#this initial idae is shit, because then, all countries would be covered by rare species 
-#so then it would be better to determine, how what is the coverage of rare species by using quantile 
-#define rarity more strictly by selecting only the top X% most rare species occurrences, for example by selecting only top 5%
-threshold <- quantile(values(rarity_raster), 0.90, na.rm = TRUE)
-rarity_binary_raster <- terra::app(rarity_raster, fun = function(x) ifelse(x > threshold, 1, NA))
-
-
-#pixel count of rare species and for each country 
-results_binary <- exact_extract(rarity_binary_raster, countries, 'count', progress = TRUE)
-
-countries$num_rarity_pixels <- results_binary
-#but now we got this , count total number of pixel (for each country)
-#because the problem we have now, is that big country = more rare species 
-total_pixels <- exact_extract(rarity_raster, countries, 'count', progress = TRUE)
-countries$total_pixels <- total_pixels
-countries$percent_rarity_area <- (countries$num_rarity_pixels / countries$total_pixels) * 100
-
-test = countries %>% dplyr::select(name , adm0_a3, mean_rarity, num_rarity_pixels,total_pixels,percent_rarity_area)
-#ok but then it is too high... because wuantile is based from more diverse country, and here for example most countryes look like shit 
-
-#alternative methode
-threshold <- quantile(values(rarity_raster), 0.95, na.rm = TRUE)
-
-# Step 2: Create a binary raster (only cells with values above the threshold are considered "rare")
-rarity_binary_raster <- app(rarity_raster, fun = function(x) ifelse(x > threshold, 1, NA))
-#rarity_binary_raster <- app(rarity_raster, fun = function(x) ifelse(x > threshold, x, NA))
-
-# Step 3: Plot to check the areas with rare species
-plot(rarity_binary_raster)
-
-#update to make it at country level
-library(terra)
-
-path = "/Users/vjourne/Documents/Projets_annexes/PoliticsEcology"
-country_shp <- st_read(paste0(path,"/gadm_410.gpkg"))
-
-vector.country = unique(country_shp$COUNTRY)
-countries <- st_transform(countries, crs(rarity_binary_raster))
-results <- list()
-#same as before except that here Im doing this at country level
-for (i in 1:nrow(countries)) {
-  boundary_data <- country_shp %>% filter(COUNTRY == vector.country[i])
-  
-  # repair any geometry issues, dissolve the border, reproject to same
-  # coordinate system as the protected area data, and repair the geometry again
-  sf_use_s2(FALSE)
-  
-  boundary_data <-
-    boundary_data %>%
-    sf::st_make_valid() %>%
-    st_set_precision(1000) %>%
-    st_combine() %>%
-    st_union() %>%
-    st_set_precision(1000) %>%
-    sf::st_make_valid() %>%
-    st_transform(st_crs(rarity_binary_raster)) %>%
-    sf::st_make_valid()
-  
-  country_vect <- vect(boundary_data)
-  country_crop <- terra::crop(rarity_raster, ext(country_vect))
-  country_rare_raster <- terra::mask(country_crop, country_vect)
-  total_cells <- terra::ncell(country_rare_raster) #cell country 
-  shapefil_cells <- sum(!is.na(values(country_rare_raster))) #cell PA 
-  #now want to know how many are not NA and >0, because here the probleme is that nb of cell is based on the ext()
-  #so first remove NA 
-  #do not know why but eadge have high species richness... but using mean would be OK 
-  nb.cell.no.na <- values(country_rare_raster)[!is.na(values(country_rare_raster))]
-  mean.species.rich = mean(nb.cell.no.na, na.rm = T)#adapted for each country, number of mean threaten species by pixel in pa 
-  rare_cells = sum(nb.cell.no.na>mean.species.rich)
-  #so here basically, all cell are rare cell ! 
-  coverage_percentage <- (rare_cells / shapefil_cells) * 100
-  
-  #now for non binary 
-  #average species threaten by pixel acros all pixel 
-  avg_threatened_species_per_protected_pixel <- mean.species.rich/shapefil_cells
-  
-  
-  
-  results[[i]] <- data.frame(
-    country = vector.country[i],  # Using country name from the sf object
-    shapefil_cells = shapefil_cells,
-    rare_cells = rare_cells,
-    total_cells = total_cells,
-    coverage_percentage = coverage_percentage,
-    avg_threatened_species_per_protected_pixel = avg_threatened_species_per_protected_pixel
-  )
-}
-
-# For each country, we calculate the percentage of the total area covered by rare species by counting the number of cells where rare species are present
-coverage_df <- do.call(rbind, results)
-plot(log(avg_threatened_species_per_protected_pixel)~coverage_percentage, data = coverage_df)
 
 ##################################################################
 #4 - format data of behavior traits
@@ -238,39 +98,26 @@ load("./data/covid_gps.RData")
 load("./data/covid_evws_80.RData")
 
 
-##################################################################
-#4 - HDI for me extended - with last data
-library(countrycode)
-#load and convert to HDI numeric and isocode 
-HDI = read_excel('data/HDR23-24_Statistical_Annex_HDI_Table.xlsx', skip = 7) %>% 
-  dplyr::select(2, 3) %>% 
-  rename(Country = 1, HDIvalue = 2) %>% 
-  mutate(HDIvalue = as.numeric(as.character(HDIvalue))) %>% 
-  drop_na() %>% 
-  mutate(ISOCODE = countrycode(Country, "country.name", "iso3c")) %>% 
-  drop_na()
-  
-
 ################################################################
 ################################################################
 ################MAPS 1################################
 #get shp world maps
-world_sf <- ne_countries(returnclass = "sf", scale = 50) #scale change resoluton maps
+#world_sf <- ne_countries(returnclass = "sf", scale = 50) #scale change resoluton maps
 world_sf <- ne_countries(returnclass = "sf")
 
 #make boxplot percetange 
 #use here the initial box version, with information about regional, internation and national PA
-boxplotareas = ggplot(summarypercentagearea_versionNatRegInter %>% 
-                        dplyr::filter(MARINE == 'terrestrial') %>% 
-                        filter(DESIG_TYPE != 'Not Applicable'), aes(x = DESIG_TYPE, 
-                                                                    y = percentageByCountry))+
-  geom_boxplot()+
-  coord_flip()+
-  ylab('Percentage')+
-  xlab('')+
-  theme_bw()+
-  theme(axis.text = element_text(size = 14),
-        axis.title = element_text(size = 15))
+# boxplotareas = ggplot(summarypercentagearea_versionNatRegInter %>% 
+#                         dplyr::filter(MARINE == 'terrestrial') %>% 
+#                         filter(DESIG_TYPE != 'Not Applicable'), aes(x = DESIG_TYPE, 
+#                                                                     y = percentageByCountry))+
+#   geom_boxplot()+
+#   coord_flip()+
+#   ylab('Percentage')+
+#   xlab('')+
+#   theme_bw()+
+#   theme(axis.text = element_text(size = 14),
+#         axis.title = element_text(size = 15))
 
 vectorPAcountry = summarypercentagearea %>% 
   dplyr::select(country, perecentageTOTALovercountry) %>% 
@@ -281,7 +128,14 @@ vectorPAcountry = summarypercentagearea %>%
 tt = world_sf %>% mutate(ISOCODE = adm0_a3) %>% 
   full_join(vectorPAcountry) %>% 
   filter(admin != 'Antarctica')
+#for results presentation 
+tt %>% 
+  group_by(region_wb) %>% 
+  summarise(mean = mean(`Protected area surface (%)`, na.rm = T),
+            sd = sd(`Protected area surface (%)`, na.rm = T)) %>% 
+  arrange(mean)
 
+#make maps now 
 mapsPA = ggplot(data=tt, aes(fill = `Protected area surface (%)`))+ 
   geom_sf(col = 'darkred', linewidth = .05)+     #plot map of France
   xlab(" ")+ ylab(" ")+
@@ -294,21 +148,14 @@ mapsPA = ggplot(data=tt, aes(fill = `Protected area surface (%)`))+
   theme(legend.title = element_text(size = 12), 
         legend.text  = element_text(size = 10))
 
-#for results presentation 
-tt %>% 
-  group_by(region_wb) %>% 
-  summarise(mean = mean(`Protected area surface (%)`, na.rm = T),
-            sd = sd(`Protected area surface (%)`, na.rm = T)) %>% 
-  arrange(mean)
-
 #combine map and boxplot 
-plotmaps = ggdraw() +
-  draw_plot(mapsPA) +
-  draw_plot(boxplotareas, x = 0.05, y = 0.0, width = .3, height = .25)
-plotmaps
-
-cowplot::save_plot("plotmaps.png",plotmaps, 
-                   ncol = 2.4, nrow = 1.9, dpi = 300)
+# plotmaps = ggdraw() +
+#   draw_plot(mapsPA) +
+#   draw_plot(boxplotareas, x = 0.05, y = 0.0, width = .3, height = .25)
+# plotmaps
+# 
+# cowplot::save_plot("plotmaps.png",plotmaps, 
+#                    ncol = 2.4, nrow = 1.9, dpi = 300)
 
 #new up version maps
 # Identify outliers
@@ -324,6 +171,7 @@ outliers <- summarypercentagearea_versionNatRegInter%>%
   mutate(ISOCODE = country) %>% 
   left_join( world_sf %>% mutate(ISOCODE = adm0_a3) %>% dplyr::select(ISOCODE, name_en))
 
+#then make boxplot of outliers 
 boxplotareas.v2 = ggplot(summarypercentagearea_versionNatRegInter %>% 
                         dplyr::filter(MARINE == 'terrestrial') %>% 
                         filter(DESIG_TYPE != 'Not Applicable'), aes(x = DESIG_TYPE, 
@@ -347,7 +195,7 @@ plotmaps
 cowplot::save_plot("plotmaps.png",plotmaps, 
                    ncol = 2.4, nrow = 1.9, dpi = 300)
 
-#for results summary 
+#for results summary main text 
 summarypercentagearea_versionNatRegInter %>% 
   dplyr::filter(MARINE == 'terrestrial') %>% 
   filter(DESIG_TYPE != 'Not Applicable') %>% 
@@ -355,6 +203,9 @@ summarypercentagearea_versionNatRegInter %>%
   summarise(mean = mean(percentageByCountry),
             sd = sd(percentageByCountry))
 
+
+#######################
+#sup fig PA annexe 
 boxplotareas.iucn = ggplot(summarypercentagearea_versionNatRegInter %>% 
                         dplyr::filter(MARINE == 'terrestrial'), aes(x = IUCN_CAT, 
                                                                     y = percentageByCountry))+
@@ -368,12 +219,14 @@ boxplotareas.iucn = ggplot(summarypercentagearea_versionNatRegInter %>%
 cowplot::save_plot("iucnbox.png",boxplotareas.iucn, 
                    ncol = 1.3, nrow = 1.9, dpi = 300)
 
+#result main text summary
 summarypercentagearea_versionNatRegInter %>% 
   dplyr::filter(MARINE == 'terrestrial') %>% 
   group_by(IUCN_CAT) %>% 
   summarise(mean = mean(percentageByCountry),
             sd = sd(percentageByCountry)) 
 
+#######################
 #sup fig PA annexe 
 vectorPAcountry.PAtype = summarypercentagearea_versionNatRegInter %>% 
   dplyr::filter(MARINE == 'terrestrial') %>% 
@@ -413,8 +266,7 @@ cowplot::save_plot("typeOfPAs.png",maps.PA.subset,
 ################################################################
 ################################################################
 ################WITH GPS################################
-library(FactoMineR)
-library(factoextra)
+
 #selected columns - intiial without robust method
 # PAterrestre = summarypercentagearea %>% 
 #   dplyr::filter(MARINE == 'terrestrial') %>% 
@@ -430,29 +282,28 @@ PAterrestre = summarypercentagearea %>%
   dplyr::select(isocode, percentageByCountry_sum) %>% 
   distinct()
 
+#to avoid issue, want the select function dplyr:: package 
 select <- dplyr::select
 #redo with left join stuff
 gps <- covid_gps %>%
-  select("isocode","continent","country","population_density","human_development_index", "gdp_per_capita", 
-         "patience"   ,# , "polstab" ,"account","gov_eff","regqual","corrupt","rulelaw",                      
-         "risktaking"         ,                "posrecip"     ,                     
-         "negrecip"         ,                  "altruism"    ,                      
-         "trust"     ) 
+  select("isocode","continent","country","population_density",
+         "human_development_index", "gdp_per_capita", 
+         "patience","risktaking","posrecip",                     
+         "negrecip","altruism",                      
+         "trust") 
 
 PAgps = PAterrestre %>% 
   left_join(gps) %>% 
-  left_join(landusedata.managed %>% dplyr::select(-Country, -Year) %>% rename(isocode = COU,
+  left_join(landusedata.managed %>% dplyr::select(-Country) %>% rename(isocode = COU,
                                                                               PercentageUrban = Value)) %>% 
   left_join(governancedata.managed %>% dplyr::select(-Country)) %>% 
   drop_na('gdp_per_capita')
 
-colnames(PAgps)
-
 #do a PCA with filled species 
+#use those specific for PCA 
 PAgps.sub <- PAgps %>% ungroup() %>% dplyr::select('isocode', "human_development_index","gdp_per_capita", 'population_density', 
-                                                   'PercentageUrban',
-                                                   'VoiceAccount', "PoliticalStability" ,"GovEffectiveness","RegulatoryQuality","RuleOfLaw","ControlCorruption"
-) %>% mutate(gdp_per_capita = scale(log10(gdp_per_capita), center = TRUE, scale = TRUE),
+                                                   'PercentageUrban','VoiceAccount', "PoliticalStability" ,"GovEffectiveness",
+                                                   "RegulatoryQuality","RuleOfLaw","ControlCorruption") %>% mutate(gdp_per_capita = scale(log10(gdp_per_capita), center = TRUE, scale = TRUE),
              human_development_index = scale((human_development_index), center = T, scale = T),
              PercentageUrban = scale(PercentageUrban, center = T, scale = T),
              population_density = scale(log10(population_density), center = T, scale = T)) %>% 
@@ -460,11 +311,10 @@ PAgps.sub <- PAgps %>% ungroup() %>% dplyr::select('isocode', "human_development
 row.names(PAgps.sub) <- PAgps.sub$isocode
 PAgps.sub.analysis <- PAgps.sub[c(2:(ncol(PAgps.sub)-1))] #6 traits variable
 PCAnew <- ade4::dudi.pca(PAgps.sub.analysis, center = FALSE, scale = FALSE, scannf = F, nf = ncol(PAgps.sub.analysis))
-screeplot(PCAnew, main = "Screeplot - Eigenvalues")
 ade4::s.corcircle(PCAnew$co, xax = 1, yax = 2)
 ade4::s.corcircle(PCAnew$co, xax = 3, yax = 2)
 factoextra::fviz_eig(PCAnew, addlabels = TRUE, ylim = c(0, 100))
-fviz_pca_var(PCAnew, col.var = "black", axes = c(3, 2))
+factoextra::fviz_pca_var(PCAnew, col.var = "black", axes = c(3, 2))
 
 #after PCA, we'll make some analysis 
 PAgps.PCA <- cbind(PAgps, PCAnew$li[,1], PCAnew$li[,2]) %>% 
@@ -472,88 +322,20 @@ PAgps.PCA <- cbind(PAgps, PCAnew$li[,1], PCAnew$li[,2]) %>%
   rename(PCA1 = 21, PCA2 = 22) %>% 
   mutate(beta.PA = percentageByCountry_sum/100,
          logit.PA = car::logit(beta.PA))%>%
-  mutate(gdp_per_capita = scale(log10(gdp_per_capita), center = TRUE, scale = TRUE)) %>% 
-         #negrecip = scale(negrecip, center = T, scale = T),
-         #altruism = scale(altruism, center = T, scale = T),
-         #trust = scale(trust, center = T, scale = T),
-         #patience = scale(patience, center = T, scale = T),
-         #posrecip = scale(posrecip, center = T, scale = T),
-         #risktaking = scale(risktaking, center = T, scale = T)) #%>% 
-  #left_join(HDI %>% dplyr::select(ISOCODE, HDIvalue) %>% rename(isocode = ISOCODE)) %>% 
-  left_join(coverage_df%>% dplyr::select(country, avg_threatened_species_per_protected_pixel))
+  mutate(gdp_per_capita = scale(log10(gdp_per_capita), center = TRUE, scale = TRUE))
 
-#model TMB 
-library(glmmTMB)
-library(brms)
+#now model with different formula
 colnames(PAgps.PCA)
-#update, remove posres and negrec
-formula.gps1 = formula(beta.PA~negrecip+altruism+trust+patience+posrecip+risktaking+PCA1+PCA2)
+#update, remove posres and negrec (because strongly correlated )
 formula.gps1 = formula(beta.PA~altruism+trust+patience+risktaking+PCA1+PCA2)
-
-# formula.gps1.scale = formula(beta.PA~negrecip.scale+
-#                                altruism.scale+
-#                                trust.scale+
-#                                patience.scale+
-#                                posrecip.scale+
-#                                risktaking.scale+PCA1+PCA2)
-
-
-m.gps <- glmmTMB(formula.gps1, data = PAgps.PCA, family=beta_family())
-#m.gps.scale <- glmmTMB(formula.gps1.scale, data = PAgps.PCA, family=beta_family())
-
-summary(m.gps)
-#summary(m.gps.scale)
-simulation.m.gps <- simulateResiduals(fittedModel = m.gps, quantreg=T, n = 500)
-plot(simulation.m.gps)
-coef.gps <-broom.mixed::tidy(m.gps,conf.int =TRUE)
-dw <-dotwhisker::dwplot(m.gps, by_2sd = T)
-
-#do some cv - estimate of model coefficient 
-library(rsample)
-
-# Create resamples (e.g., 10-fold cross-validation)
-set.seed(123)
-cv_splits <- vfold_cv(PAgps.PCA, v = 10, repeats = 5)
-
-# Function to fit the model and compute performance metrics
-cv_model <- function(split,
-                     formula.up) {
-  library(rsample)
-  train_data <- training(split)
-  test_data <- testing(split)
-  
-  # Fit the model
-  model <- glmmTMB(formula.up, data = train_data, family = beta_family())
-  # Calculate performance metrics (here pseudo r2 and rmse, just for myself)
-  actuals <- test_data$beta.PA
-  #rmse_val <- RMSE(qlogis(test_data$beta.PA), predict(model, newdata = test_data, type = "link"))
-  pseudo_r2 <- cor(qlogis(test_data$beta.PA), predict(model, newdata = test_data, type = "link"))^2 
-  
-  return(pseudo_r2)
-}
-
-# run fun 
-cv_results <- map_dbl(cv_splits$splits, cv_model)
-summary(cv_results) #average pseudor2 = 0.2 median = .15 
-
-
-
-
-formula.gps.traits = formula(beta.PA~negrecip+altruism+trust+patience+posrecip+risktaking)
 formula.gps.traits = formula(beta.PA~altruism+trust+patience+risktaking)
-
 formula.gps.pca = formula(beta.PA~PCA1+PCA2)
-
-formula.gps.gdp = formula(beta.PA~negrecip+altruism+trust+patience+posrecip+risktaking+gdp_per_capita)
 formula.gps.gdp = formula(beta.PA~altruism+trust+patience+risktaking+gdp_per_capita)
-
 formula.gdp = formula(beta.PA~gdp_per_capita)
-
-formula.gps.hdi = formula(beta.PA~negrecip+altruism+trust+patience+posrecip+risktaking+human_development_index)
 formula.gps.hdi = formula(beta.PA~altruism+trust+patience+risktaking+human_development_index)
-
 formula.hdi = formula(beta.PA~human_development_index)
 
+m.gps <- glmmTMB(formula.gps1, data = PAgps.PCA, family=beta_family())
 m.gps.traits <- glmmTMB(formula.gps.traits, data = PAgps.PCA, family=beta_family())
 m.gps.pca <- glmmTMB(formula.gps.pca, data = PAgps.PCA, family=beta_family())
 m.gps.gdp <- glmmTMB(formula.gps.gdp, data = PAgps.PCA, family=beta_family())
@@ -561,33 +343,9 @@ m.gdp <- glmmTMB(formula.gdp, data = PAgps.PCA, family=beta_family())
 m.gps.hdi <- glmmTMB(formula.gps.hdi, data = PAgps.PCA, family=beta_family())
 m.hdi <- glmmTMB(formula.hdi, data = PAgps.PCA, family=beta_family())
 
+#model selection 
 #null model for pseudo r2 HC 
-m.null <- glmmTMB(beta.PA~1, data = PAgps.PCA, family=beta_family())
-
-performance::model_performance(m.gps.traits, metrics = c("AIC", "AICc", "BIC", "ICC", "RMSE"))
-performance::model_performance(m.gps.pca, metrics = c("AIC", "AICc", "BIC", "ICC", "RMSE"))
-performance::model_performance(m.gps, metrics = c("AIC", "AICc", "BIC", "ICC", "RMSE"))
-performance::model_performance(m.gdp, metrics = c("AIC", "AICc", "BIC", "ICC", "RMSE"))
-
-lmtest::lrtest(m.gps.traits, m.gps.pca, m.gps, m.gdp, m.hdi)
-
-#https://cran.r-project.org/web/packages/PerMat/vignettes/PerMat.html
-library(PerMat)
-RMSE(qlogis(PAgps.PCA$beta.PA), predict(m.gps, type = "link"))
-RMSE(qlogis(PAgps.PCA$beta.PA), predict(m.gps.traits, type = "link"))
-RMSE(qlogis(PAgps.PCA$beta.PA), predict(m.gps.pca, type = "link"))
-RMSE(qlogis(PAgps.PCA$beta.PA), predict(m.gps.gdp, type = "link"))
-
-# m.gps.betaregR <- betareg(formula.gps1, data = PAgps.PCA)
-#summary(m.gps.betaregR)
-# reducedModel <- StepBeta::StepBeta(m.gps.betaregR)
-# summary(reducedModel)
-# 
-# options(na.action = "na.fail")
-# model_set <- dredge(m.gps.betaregR)
-# best_model <- get.models(model_set, subset = 1)[[1]]
-# summary(best_model)
-
+lmtest::lrtest(m.gps, m.gps.traits, m.gps.pca, m.gdp, m.hdi)
 
 cor(qlogis(PAgps.PCA$beta.PA), predict(m.gps, type = "link"))^2 
 cor(qlogis(PAgps.PCA$beta.PA), predict(m.gps.traits, type = "link"))^2 
@@ -597,49 +355,44 @@ cor(qlogis(PAgps.PCA$beta.PA), predict(m.gdp, type = "link"))^2
 cor(qlogis(PAgps.PCA$beta.PA), predict(m.gps.hdi, type = "link"))^2 
 cor(qlogis(PAgps.PCA$beta.PA), predict(m.hdi, type = "link"))^2 
 
-#for species risk because less observation 
-PAgps.PCA.riskspecies = PAgps.PCA %>% drop_na(avg_threatened_species_per_protected_pixel)
-formula.speciesrisk = formula(beta.PA~log(avg_threatened_species_per_protected_pixel))
-m.speciesrisk<- glmmTMB(formula.speciesrisk, data = PAgps.PCA.riskspecies, family=beta_family())
-performance::model_performance(m.speciesrisk, metrics = c("AIC", "AICc", "BIC", "ICC", "RMSE"))
-cor(qlogis(PAgps.PCA.riskspecies$beta.PA), predict(m.speciesrisk, type = "link"))^2 
-
-# priors <- c(
-#   prior(normal(0, 1), class = "b"),
-#   prior(student_t(3, 0, 2.5), class = "Intercept")
-# )
-# 
-# m.gps.bayes = brm(formula.gps1,
-#                   data = PAgps.PCA,
-#                   family=beta_family(),
-#                   chains = 6,
-#                   iter = 20000,
-#                   warmup = 1000,
-#                   backend = 'cmdstanr',
-#                   prior = priors)
-# summary(m.gps.bayes)
-# coef.gps.bayes <-broom.mixed::tidy(m.gps.bayes,conf.int =TRUE);coef.gps.bayes
-# bayestestR::p_map(m.gps.bayes)
-#check r2 and rmse 
 #will not report r2
 #https://bpspsychub.onlinelibrary.wiley.com/doi/10.1111/bmsp.12289
 #compute the pseudo r2 for beta rege 
-cor(qlogis(PAgps.PCA$beta.PA), predict(m.gps, type = "link"))^2 
 #with another r2 
 ## McFadden's pseudo-R-squared
+m.null <- glmmTMB(beta.PA~1, data = PAgps.PCA, family=beta_family())
 1- as.vector(logLik(m.null)/logLik(m.gps))
 1- as.vector(logLik(m.null)/logLik(m.gps.traits))
 1- as.vector(logLik(m.null)/logLik(m.gps.pca))
 1- as.vector(logLik(m.null)/logLik(m.gps.gdp))
 1- as.vector(logLik(m.null)/logLik(m.gdp))
 
+#another, here use response, but not recommended 
+#just for personnal check 
 cor((PAgps.PCA$beta.PA), predict(m.gps, type = "response"))^2 
 cor((PAgps.PCA$beta.PA), predict(m.gps.traits, type = "response"))^2 
 cor((PAgps.PCA$beta.PA), predict(m.gps.pca, type = "response"))^2 
 
+#best model 
+summary(m.gps)
+simulation.m.gps <- simulateResiduals(fittedModel = m.gps, quantreg=T, n = 500)
+plot(simulation.m.gps)
+coef.gps <-broom.mixed::tidy(m.gps,conf.int =TRUE)
 
+# Create resamples (e.g., 10-fold cross-validation)
+#take some time... 
+#provided similar results, not reported in the main text, for pseudo r2
+runcross.validation = T
+if(runcross.validation==TRUE){
+  set.seed(123)
+  cv_splits <- rsample::vfold_cv(PAgps.PCA, v = 10, repeats = 1)
+  cv_results <- map_dbl(cv_splits$splits, ~cv_model(split = .x, formula.up = formula.gps1))
+  summary(cv_results) #average pseudor2 = 0.2 median = .15 
+}
+
+#FULL MODEL SUMMARY IN SUPPLEMENT - FOR GPS 
 #model summary for supplement 
-library(modelsummary)
+#PAY ATTENTION, later I have copy pasted this piece of code for EVWS
 formula_full_gps <- beta.PA ~ altruism + trust + patience + risktaking + PCA1 + PCA2
 primary_predictors <- c("altruism", "trust", "patience", "risktaking")
 pca_predictors <- c("PCA1", "PCA2")
@@ -685,34 +438,6 @@ out.gps %>%
 
 
 
-# dwup = dw$data %>% 
-#   mutate(significnace = ifelse(p.value < .05, 'y', 'ns')) %>% 
-#   mutate( term = dplyr::recode(term, "negrecip" = "Reciprocity (-)" ,  
-#                                "posrecip" = "Reciprocity (+)",
-#                                "altruism" = "Altruism",
-#                                'trust' = "Trust",
-#                                "patience" = "Patience",
-#                                "risktaking" = "Risktaking")) %>% 
-#   mutate(term = factor(term, levels = rev(c("Reciprocity (-)",
-#                                             "Reciprocity (+)",
-#                                             "Altruism",
-#                                             "Trust", 
-#                                             "Patience",
-#                                             "Risktaking",
-#                                             'PCA1',
-#                                             'PCA2')))) %>% 
-#   ggplot()+
-#   geom_point(aes(x=estimate,y=term,col=significnace))+
-#   geom_vline(xintercept=0, linetype="dashed")+
-#   geom_segment(aes(x=conf.low,y=term,xend=conf.high,
-#                    yend=term,col=significnace))+
-#   geom_vline(xintercept = 0, linetype = 'dotted')+
-#   xlab('Coefficient value')+
-#   theme(legend.position = 'none')+
-#   ylab('')
-# dwup
-
-
 #try to fir a brms model 
 library(ggdist)
 library(distributional)
@@ -753,17 +478,6 @@ ggplot(aes(y = term))+#reorder(term, estimate)
   ylab('')#+
   #annotate("text", x = 1, y = 1, label = "n=75", size = 5)
 plotv2
-
-
-#additional model with species richness threat
-PAgps.PCA.threats = PAgps.PCA %>% 
-  left_join(coverage_df) %>% 
-  drop_na(coverage_percentage)
-
-m.gps.traits.threats <- glmmTMB(beta.PA~altruism+trust+patience+risktaking+PCA1+PCA2+coverage_percentage, data = PAgps.PCA.threats, family=beta_family())
-cor(qlogis(PAgps.PCA.threats$beta.PA), predict(m.gps.traits.threats, type = "link"))^2 
-ggplot(PAgps.PCA.threats, aes(y=beta.PA, x = coverage_percentage))+geom_point()+
-  ylab('percentage PA')+xlab('coverage of threaten species')
 
 ################################################################
 ################################################################
@@ -824,11 +538,10 @@ PAevws.PCA <- cbind(PAevws, PCA.evws$li[,1], PCA.evws$li[,2]) %>%
          PCA2 = -PCA2) %>% 
   mutate(beta.PA = percentageByCountry_sum/100,
          logit.PA = car::logit(beta.PA)) %>% 
-  mutate(gdp_per_capita = scale(log10(gdp_per_capita), center = TRUE, scale = TRUE)) %>% #,
+  mutate(gdp_per_capita = scale(log10(gdp_per_capita), center = TRUE, scale = TRUE)) #,
          #wvs_altruism = scale(wvs_altruism, center = T, scale = T),
          #wvs_trust_global = scale(wvs_trust_global, center = T, scale = T),
          #wvs_patience = scale(wvs_patience, center = T, scale = T))
-  left_join(coverage_df%>% dplyr::select(country, avg_threatened_species_per_protected_pixel))
 
 #wvs_trust_global
 formula.evws1 = formula(beta.PA~wvs_altruism+wvs_trust_int+wvs_patience+PCA1+PCA2)
@@ -954,9 +667,8 @@ out.gps = modelsummary(models,
                        output = 'kableExtra')  # Output as a data frame
 
 out.gps %>% 
-  # kableExtra::kbl(format = 'latex', booktabs = T) %>% 
-  #kableExtra::kable(escape = F) %>% 
-  kableExtra::kable_styling()
+  kableExtra::kbl(format = 'latex', booktabs = T) %>% 
+  kableExtra::kable(escape = F) 
 
 
 
@@ -1437,9 +1149,7 @@ summary(m.gps.no)
 cor(qlogis(PAevws.PCA$beta.PA), predict(m.evws.no, type = "link"))^2 
 cor(qlogis(PAgps.PCA$beta.PA), predict(m.gps.no, type = "link"))^2 
 
-quibble <- function(x, q = c(0.25, 0.5, 0.75)) {
-  tibble(x = quantile(x, q), q = q)
-}
+
 quibble(PAterrestre$percentageByCountry_sum, c(0.025, 0.5, 0.975))
 summary(PAterrestre$percentageByCountry_sum)
 
@@ -1610,3 +1320,144 @@ plot.factor.typeiucn = ggpredict(m.gps.iucn, terms = "IUCN_CAT") %>%
 
 cowplot::save_plot("regionalnational.plot.png",plot.factor.type+plot.factor.typeiucn, 
                    ncol = 1.2, nrow = 1.2, dpi = 300)
+
+
+
+#for IUCN analysis with redlist 
+##################################################################
+#4 - format species richness for each country rarity 
+#use IUCN redlist https://www.iucnredlist.org/resources/other-spatial-downloads 
+#even if only animals species ... 
+library(raster)
+library(sf)
+library(dplyr)
+library(exactextractr)  # For raster extraction by polygons
+
+rarity_raster.init <- terra::rast("data/Combined_THR_SR_2023/Combined_THR_SR_2023.tif")
+rarity_raster_wgs84 <- terra::project(rarity_raster.init, "EPSG:4326")
+rarity_raster <- terra::ifel(rarity_raster_wgs84>126, NA, rarity_raster_wgs84)
+countries <- ne_countries(returnclass = "sf")
+
+#just check with plot 
+library(rasterVis)
+gplot(rarity_raster) + 
+  geom_tile(aes(fill = value)) 
+
+#writeRaster(rarity_raster,'test.tif')
+
+# extracts the raster values within each country's boundaries
+results <- exact_extract(rarity_raster, countries, 'mean', progress = TRUE)
+countries$mean_rarity <- results
+# make raster values into "rarity" or "no rarity", if higher than 0 strictly 
+#rarity_binary_raster <- terra::app(rarity_raster, fun = function(x) ifelse(x > 0, 1, NA))
+#this initial idae is shit, because then, all countries would be covered by rare species 
+#so then it would be better to determine, how what is the coverage of rare species by using quantile 
+#define rarity more strictly by selecting only the top X% most rare species occurrences, for example by selecting only top 5%
+threshold <- quantile(values(rarity_raster), 0.90, na.rm = TRUE)
+rarity_binary_raster <- terra::app(rarity_raster, fun = function(x) ifelse(x > threshold, 1, NA))
+
+
+#pixel count of rare species and for each country 
+results_binary <- exact_extract(rarity_binary_raster, countries, 'count', progress = TRUE)
+
+countries$num_rarity_pixels <- results_binary
+#but now we got this , count total number of pixel (for each country)
+#because the problem we have now, is that big country = more rare species 
+total_pixels <- exact_extract(rarity_raster, countries, 'count', progress = TRUE)
+countries$total_pixels <- total_pixels
+countries$percent_rarity_area <- (countries$num_rarity_pixels / countries$total_pixels) * 100
+
+test = countries %>% dplyr::select(name , adm0_a3, mean_rarity, num_rarity_pixels,total_pixels,percent_rarity_area)
+#ok but then it is too high... because wuantile is based from more diverse country, and here for example most countryes look like shit 
+
+#alternative methode
+threshold <- quantile(values(rarity_raster), 0.95, na.rm = TRUE)
+
+# Step 2: Create a binary raster (only cells with values above the threshold are considered "rare")
+rarity_binary_raster <- app(rarity_raster, fun = function(x) ifelse(x > threshold, 1, NA))
+#rarity_binary_raster <- app(rarity_raster, fun = function(x) ifelse(x > threshold, x, NA))
+
+# Step 3: Plot to check the areas with rare species
+plot(rarity_binary_raster)
+
+#update to make it at country level
+library(terra)
+
+path = "/Users/vjourne/Documents/Projets_annexes/PoliticsEcology"
+country_shp <- st_read(paste0(path,"/gadm_410.gpkg"))
+
+vector.country = unique(country_shp$COUNTRY)
+countries <- st_transform(countries, crs(rarity_binary_raster))
+results <- list()
+#same as before except that here Im doing this at country level
+for (i in 1:nrow(countries)) {
+  boundary_data <- country_shp %>% filter(COUNTRY == vector.country[i])
+  
+  # repair any geometry issues, dissolve the border, reproject to same
+  # coordinate system as the protected area data, and repair the geometry again
+  sf_use_s2(FALSE)
+  
+  boundary_data <-
+    boundary_data %>%
+    sf::st_make_valid() %>%
+    st_set_precision(1000) %>%
+    st_combine() %>%
+    st_union() %>%
+    st_set_precision(1000) %>%
+    sf::st_make_valid() %>%
+    st_transform(st_crs(rarity_binary_raster)) %>%
+    sf::st_make_valid()
+  
+  country_vect <- vect(boundary_data)
+  country_crop <- terra::crop(rarity_raster, ext(country_vect))
+  country_rare_raster <- terra::mask(country_crop, country_vect)
+  total_cells <- terra::ncell(country_rare_raster) #cell country 
+  shapefil_cells <- sum(!is.na(values(country_rare_raster))) #cell PA 
+  #now want to know how many are not NA and >0, because here the probleme is that nb of cell is based on the ext()
+  #so first remove NA 
+  #do not know why but eadge have high species richness... but using mean would be OK 
+  nb.cell.no.na <- values(country_rare_raster)[!is.na(values(country_rare_raster))]
+  mean.species.rich = mean(nb.cell.no.na, na.rm = T)#adapted for each country, number of mean threaten species by pixel in pa 
+  rare_cells = sum(nb.cell.no.na>mean.species.rich)
+  #so here basically, all cell are rare cell ! 
+  coverage_percentage <- (rare_cells / shapefil_cells) * 100
+  
+  #now for non binary 
+  #average species threaten by pixel acros all pixel 
+  avg_threatened_species_per_protected_pixel <- mean.species.rich/shapefil_cells
+  
+  
+  
+  results[[i]] <- data.frame(
+    country = vector.country[i],  # Using country name from the sf object
+    shapefil_cells = shapefil_cells,
+    rare_cells = rare_cells,
+    total_cells = total_cells,
+    coverage_percentage = coverage_percentage,
+    avg_threatened_species_per_protected_pixel = avg_threatened_species_per_protected_pixel
+  )
+}
+
+# For each country, we calculate the percentage of the total area covered by rare species by counting the number of cells where rare species are present
+coverage_df <- do.call(rbind, results)
+plot(log(avg_threatened_species_per_protected_pixel)~coverage_percentage, data = coverage_df)
+
+#additional model with species richness threat
+PAgps.PCA.threats = PAgps.PCA %>% 
+  left_join(coverage_df) %>% 
+  drop_na(coverage_percentage)
+
+m.gps.traits.threats <- glmmTMB(beta.PA~altruism+trust+patience+risktaking+PCA1+PCA2+coverage_percentage, data = PAgps.PCA.threats, family=beta_family())
+cor(qlogis(PAgps.PCA.threats$beta.PA), predict(m.gps.traits.threats, type = "link"))^2 
+ggplot(PAgps.PCA.threats, aes(y=beta.PA, x = coverage_percentage))+geom_point()+
+  ylab('percentage PA')+xlab('coverage of threaten species')
+
+PAevws.PCA %>% 
+  left_join(coverage_df%>% dplyr::select(country, avg_threatened_species_per_protected_pixel))
+
+#for species risk because less observation 
+PAgps.PCA.riskspecies = PAgps.PCA %>% drop_na(avg_threatened_species_per_protected_pixel)
+formula.speciesrisk = formula(beta.PA~log(avg_threatened_species_per_protected_pixel))
+m.speciesrisk<- glmmTMB(formula.speciesrisk, data = PAgps.PCA.riskspecies, family=beta_family())
+performance::model_performance(m.speciesrisk, metrics = c("AIC", "AICc", "BIC", "ICC", "RMSE"))
+cor(qlogis(PAgps.PCA.riskspecies$beta.PA), predict(m.speciesrisk, type = "link"))^2 
